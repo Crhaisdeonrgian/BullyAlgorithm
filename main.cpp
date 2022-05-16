@@ -1,8 +1,8 @@
 ﻿#include "DSSimul.h"
 #include <sstream>
+////At the beginning tried to do with switch(str) but it didnt work well and i gave up
 //#include "str_switch.h"
-//Implementing Bully Election Algorithm
-int timeout = 10;
+int timeout = 12;
 void informAll(Process *process){
     for(auto neib: process->neibs()){
         process->networkLayer->send(process->node, neib, Message("Coordinator"));
@@ -14,34 +14,41 @@ void informContenders(Process *process){
         process->networkLayer->send(process->node, *neib, Message("Elections"));
     }
 }
-
+//Implementing Bully Election Algorithm
 int workFunction_BULLY(Process *process, Message message){
     NetworkLayer *networkLayer = process->networkLayer;
     set<int> neibs = process->neibs();
     string textInput = message.getString();
     if (textInput == "Elections"){
-        process->contextBully.processing = true;
         printf("#%d: Elections message received from %d\n", process->node, message.from);
+        process->contextBully.processing = true;
         auto start = neibs.upper_bound(process->node);
         if (start == neibs.end()) {
             //Easy win
-            informAll(process);
+            for(auto neib: process->neibs()){
+                networkLayer->send(process->node, neib, Message("Coordinator"));
+            }
             process->contextBully.processing = false;
         } else {
-            informContenders(process);
+            //informing contenders
+            for (auto neib = neibs.upper_bound(process->node); neib != neibs.end(); ++neib) {
+                networkLayer->send(process->node, *neib, Message("Elections"));
+            }
             if (message.from == -1)
                 return true;
             networkLayer->send(process->node, message.from, Message("Alive"));
         }
     } else if (textInput == "Alive"){
-        //log
         printf("#%d: Alive message received from %d\n", process->node, message.from);
+        //logging whether somebody talked to current process or not
         process->contextBully.aliveRecieved = true;
     } else if (textInput == "Coordinator"){
         //Taking the Coordinator role
         printf("#%d: Coordinator message received from %d\n", process->node, message.from);
         if (message.from < process->node){
-            informAll(process);
+            for(auto neib: process->neibs()){
+                networkLayer->send(process->node, neib, Message("Coordinator"));
+            }
             process->contextBully.coordinatorId = process->node;
         } else {
             process->contextBully.coordinatorId = message.from;
@@ -56,15 +63,20 @@ int workFunction_BULLY(Process *process, Message message){
         if (process->contextBully.processing) {
             if (process->contextBully.timeStamp != -1)
                 process->contextBully.timeStamp = time;
+            //If nobody talked to current process he takes Coordinator role
             if (!process->contextBully.aliveRecieved && (time > process->contextBully.timeStamp + timeout)){
-                informAll(process);
+                for(auto neib: process->neibs()){
+                    networkLayer->send(process->node, neib, Message("Coordinator"));
+                }
                 process->contextBully.coordinatorId = process->node;
                 process->contextBully.processing = false;
                 process->contextBully.timeStamp = -1;
                 printf("#%d: Everybody is silent so it's my turn to be Coordinator\n", process->node);
+                //If somebody talked to process he restarts elections
             } else if (process->contextBully.aliveRecieved && (time > process->contextBully.timeStamp + timeout)) {
-                informContenders(process);
-                printf("#%d: Restarting elections\n", process->node);
+                for (auto neib = neibs.upper_bound(process->node); neib != neibs.end(); ++neib) {
+                    networkLayer->send(process->node, *neib, Message("Elections"));
+                }                printf("#%d: Restarting elections\n", process->node);
                 process->contextBully.timeStamp = -1;
             }
         }
